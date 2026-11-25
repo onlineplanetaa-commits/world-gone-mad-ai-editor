@@ -194,7 +194,7 @@ def score_research_priority(story):
     if len(summary) >= 180:
         score += 2
         reasons.append("substantive feed summary")
-    if re.search(r"\\b(earthquake|eruption|crash|encounter|sighting|discovery|attack|missile|explosion|creature|artifact|fossil|shipwreck)\\b", title, re.I):
+    if re.search(r"\b(earthquake|eruption|crash|encounter|sighting|discovery|attack|missile|explosion|creature|artifact|fossil|shipwreck)\b", title, re.I):
         score += 2
         reasons.append("concrete event signal")
     if story.get("domain") and story["domain"] != "news.google.com":
