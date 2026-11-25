@@ -7,7 +7,7 @@ A research and editorial assistant for the public Telegram channel **World Gone 
 - Searches Google News RSS for English-language story leads across selected topics.
 - Lets the editor open the original report and review publication details.
 - Provides a checklist for checking dates, sources, evidence and uncertainty.
-- Can generate an English Telegram draft using an OpenAI API key.
+- Can generate an English Telegram draft using an optional OpenAI API key.
 - Keeps source links separate from the post text.
 
 ## What it does not do
@@ -18,38 +18,37 @@ A research and editorial assistant for the public Telegram channel **World Gone 
 - Does not link to ua-stena.info.
 - Does not guarantee that feed results are accurate. The editor must verify each story.
 
-## Run locally
+## Deploy the lightweight web version on Render
 
-Python 3.10 or newer is recommended.
+The Render version uses Flask and simple HTML pages rather than the Streamlit interface.
+
+1. Sign in at https://render.com/ with GitHub.
+2. Choose **New** → **Blueprint** (or **New** → **Web Service**).
+3. Connect the repository `onlineplanetaa-commits/world-gone-mad-ai-editor`.
+4. If using Blueprint, Render reads `render.yaml` and configures the free web service.
+5. If creating a Web Service manually, use:
+   - Runtime: Python
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `gunicorn web_app:app`
+   - Health check path: `/health`
+   - Instance type: Free
+
+Free Render services sleep after 15 minutes without traffic and may take about a minute to wake. Free services have other usage limits; see https://render.com/docs/free.
+
+## Original Streamlit version
+
+The original Streamlit app remains in `app.py`. It can still be run locally with:
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Deploy free on Streamlit Community Cloud
-
-1. Sign in at https://share.streamlit.io/ using GitHub.
-2. Choose **Create app** and select this repository.
-3. Select branch `main` and main file path `app.py`.
-4. Deploy the app.
-
-Free hosting availability and limits are controlled by Streamlit and may change.
-
 ## Enable AI draft generation
 
 AI drafting requires an OpenAI API key and may incur API charges. It is optional.
 
-In Streamlit Community Cloud:
-1. Open the deployed app's **Settings**.
-2. Open **Secrets**.
-3. Add:
-
-```toml
-OPENAI_API_KEY = "your_api_key_here"
-```
-
-Never commit API keys to GitHub. Without a key, the RSS research and editorial checklist still work.
+For the Render version, add an environment variable named `OPENAI_API_KEY` in the service's Environment settings. Never commit API keys to GitHub. Without a key, RSS research and the editorial checklist still work.
 
 ## Editorial rule
 
