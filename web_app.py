@@ -150,7 +150,22 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <div><label for="period">Time range</label><select id="period" name="period">{% for p in ranges %}<option value="{{p}}" {% if p==period %}selected{% endif %}>{{p}}</option>{% endfor %}</select></div>
 <div><label for="limit">Number of results</label><select id="limit" name="limit">{% for n in [5,10,15,20,30] %}<option value="{{n}}" {% if n==limit %}selected{% endif %}>{{n}}</option>{% endfor %}</select></div>
 </div><button type="submit">Search news</button>
-</form></section>
+</form>
+<form method="post" action="/daily"><button type="submit">Build today’s shortlist across all topics</button></form>
+<p class="muted">Creates an on-demand 24-hour roundup. It does not publish or send anything.</p>
+</section>
+{% if daily_stories is not none %}
+<section class="panel"><h2>Today’s research shortlist</h2>
+<p class="muted">Top candidates found across all six topics in the past 24 hours. Ranking is based on recency and feed order, not AI verification.</p>
+{% if daily_stories %}
+{% for s in daily_stories %}
+<article class="story"><h3>{{loop.index}}. {{s.title}}</h3><div class="meta">{{s.category}} · {{s.published}} · {{s.source}}{% if s.publisher_domain %} · {{s.publisher_domain}}{% endif %}</div>
+{% if s.summary %}<p>{{s.summary|striptags|truncate(420)}}</p>{% endif %}
+{% if s.link %}<p><a class="button" href="{{s.link}}" target="_blank" rel="noopener noreferrer">Open original report</a></p>{% endif %}
+<form method="post" action="/research"><input type="hidden" name="title" value="{{s.title}}"><input type="hidden" name="summary" value="{{s.summary|striptags}}"><input type="hidden" name="source" value="{{s.source}}"><input type="hidden" name="source_domain" value="{{s.publisher_domain}}"><input type="hidden" name="link" value="{{s.link}}"><button type="submit">Find other coverage</button></form>
+</article>{% endfor %}
+{% else %}<div class="notice">No matching stories were found in the past 24 hours.</div>{% endif %}</section>
+{% endif %}
 {% if searched %}
 <section><h2>Research results: {{category}}</h2>
 {% if stories %}
@@ -245,7 +260,7 @@ def render_page(**kwargs):
         "categories": list(CATEGORIES), "regions": list(REGIONS), "ranges": list(RANGES),
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
-        "stories": [], "filtered_count": 0, "draft": None, "analysis_report": None, "error": None, "source_link": None,
+        "stories": [], "daily_stories": None, "filtered_count": 0, "draft": None, "analysis_report": None, "error": None, "source_link": None,
         "research_results": None, "research_title": "", "original_summary": "", "research_publisher_count": 0, "research_date_count": 0, "extracted_original": None, "extracted_results": None,
         "checklist": None, "idea": "",
     }
@@ -297,6 +312,54 @@ def search():
         return render_page(category=category, region=region, period=period, limit=limit, searched=True, stories=stories, filtered_count=filtered_count)
     except Exception as exc:
         return render_page(category=category, region=region, period=period, limit=limit, searched=True, error="News search failed: " + str(exc)), 502
+
+@app.post("/daily")
+def daily_shortlist():
+    """Build an on-demand 24-hour shortlist across all editorial categories."""
+    stories = []
+    seen_titles = set()
+    errors = []
+    for category, terms in CATEGORIES.items():
+        query = " ".join(part for part in (terms, "when:1d", "-site:ua-stena.info",
+                         '-"GTA 6"', "-gaming", "-gameplay") if part)
+        url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en&gl=US&ceid=US:en"
+        try:
+            parsed = feedparser.parse(url)
+            if getattr(parsed, "bozo", False) and not parsed.entries:
+                errors.append(category)
+                continue
+            for entry in parsed.entries:
+                if not is_relevant_story(entry):
+                    continue
+                title = entry.get("title", "").strip()
+                key = " ".join(title.lower().split())
+                if not title or key in seen_titles:
+                    continue
+                seen_titles.add(key)
+                source_url = entry.get("source", {}).get("href", "") or entry.get("source", {}).get("url", "")
+                domain = urlparse(source_url).netloc.lower().removeprefix("www.")
+                published_ts = time.mktime(entry.published_parsed) if entry.get("published_parsed") else 0
+                stories.append({
+                    "title": title,
+                    "summary": entry.get("summary", ""),
+                    "published": entry.get("published", "Date unavailable"),
+                    "source": entry.get("source", {}).get("title", "Source not identified"),
+                    "publisher_domain": domain,
+                    "link": entry.get("link", ""),
+                    "category": category,
+                    "_published_ts": published_ts,
+                })
+        except Exception:
+            errors.append(category)
+    stories.sort(key=lambda item: item["_published_ts"], reverse=True)
+    shortlist = stories[:15]
+    for item in shortlist:
+        item.pop("_published_ts", None)
+    message = None
+    if errors:
+        message = "Some topic feeds could not be searched: " + ", ".join(errors) + ". The shortlist may be incomplete."
+    return render_page(daily_stories=shortlist, error=message)
+
 
 @app.post("/research")
 def research():
