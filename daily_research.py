@@ -492,7 +492,14 @@ def main():
             story["google_link"] = original_google_link
             story["link_resolution"] = resolution_status
             story["link"] = resolved_link
-            story["article"] = fetch_article_text(resolved_link)
+            if get_domain(resolved_link) == "news.google.com":
+                story["article"] = {
+                    "status": "unavailable: Google redirect unresolved; publisher page not fetched",
+                    "text": "",
+                    "resolved_url": "",
+                }
+            else:
+                story["article"] = fetch_article_text(resolved_link)
             if index < 3 and story["coverage"]:
                 lead = story["coverage"][0]
                 lead_url, lead_resolution = resolve_google_news_url(lead["link"])
