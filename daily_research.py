@@ -190,8 +190,7 @@ class ArticleTextParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attr = dict(attrs)
-        marker = " ".join([tag, attr.get("id", ""), attr.get("class", ""), attr.get("itemprop", "")]).lower()
-        if tag in ("article", "main") or attr.get("itemprop", "").lower() == "articlebody" or any(token in marker for token in ("article-body", "articlebody", "story-body", "post-content", "entry-content", "article__content")):
+        if tag in ("article", "main"):
             self.container_depth += 1
         if tag == "meta":
             key = (attr.get("property") or attr.get("name") or "").lower()
@@ -257,22 +256,20 @@ class ArticleTextParser(HTMLParser):
         return found
 
     def article_text(self):
-        preferred = [p for in_article, p in self.paragraphs if in_article]
-        chosen = preferred if preferred else [p for _, p in self.paragraphs]
-        text = "\\n\\n".join(chosen)
-        if len(text) >= 250:
-            return text[:9000]
-        container_text = clean_text(" ".join(self.container_parts))
-        if len(container_text) >= 250:
-            return container_text[:9000]
+        # Structured articleBody is usually cleaner than page-wide paragraph scraping.
         for raw in self.jsonld_scripts:
             try:
                 bodies = self._article_bodies(json.loads(raw))
                 body = max(bodies, key=len, default="")
-                if len(body) >= 250:
+                if len(body) >= 350:
                     return body[:9000]
             except Exception:
                 pass
+        preferred = [p for in_article, p in self.paragraphs if in_article]
+        chosen = preferred if preferred else [p for _, p in self.paragraphs]
+        text = "\\n\\n".join(chosen)
+        if len(text) >= 350:
+            return text[:9000]
         if len(self.meta_description) >= 80:
             return self.meta_description[:2000]
         return text[:9000]
@@ -374,20 +371,30 @@ def fetch_article_text(url):
 
 def find_other_coverage(story):
     """Find additional publisher leads; syndication is not proof of independence."""
-    query = '"' + story["title"][:180] + '" when:7d'
-    rss_url = (
-        "https://news.google.com/rss/search?q="
-        + quote_plus(query)
-        + "&hl=en&gl=US&ceid=US:en"
-    )
-    request = Request(
-        rss_url,
-        headers={"User-Agent": "WorldGoneMadResearch/1.0 (public RSS cross-check)"},
-    )
-    try:
-        with urlopen(request, timeout=10) as response:
-            feed = feedparser.parse(response.read(800_000))
-    except Exception:
+    # Search a distinctive phrase; fall back to Bing if Google News is unavailable.
+    words = re.findall(r"[A-Za-z0-9]+", story["title"])
+    phrase = " ".join(words[:10])
+    query = phrase + " when:7d"
+    feed = None
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    }
+    feeds = [
+        "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en&gl=US&ceid=US:en",
+        "https://www.bing.com/news/search?q=" + quote_plus(phrase) + "&format=rss&setlang=en-us",
+    ]
+    for rss_url in feeds:
+        try:
+            request = Request(rss_url, headers=headers)
+            with urlopen(request, timeout=10) as response:
+                candidate = feedparser.parse(response.read(800_000))
+            if candidate.entries:
+                feed = candidate
+                break
+        except Exception:
+            continue
+    if feed is None:
         return []
 
     leads = []
