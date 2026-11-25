@@ -1,4 +1,5 @@
 import os
+import time
 from urllib.parse import quote_plus, urlparse
 
 import feedparser
@@ -128,7 +129,7 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <h3>{{research_title}}</h3>
 <p class="muted">These are search leads, not verified independent confirmation. Check whether each report has its own evidence and is not merely repeating the original story.</p>
 {% if research_results %}
-<div class="notice ok"><strong>Coverage scan</strong><p>{{research_publisher_count}} potentially distinct publishers returned matching coverage.</p><p>{{research_date_count}} different publication dates appear in these results.</p><p class="muted">This measures search coverage only. It does not establish that reports are independent, accurate or reliable.</p></div>
+<div class="notice ok"><strong>Coverage scan</strong><p>{{research_publisher_count}} potentially distinct publishers returned matching coverage.</p><p>{{research_date_count}} distinct calendar dates appear in these results.</p><p class="muted">This measures search coverage only. It does not establish that reports are independent, accurate or reliable.</p></div>
 {% for item in research_results %}
 <article class="story"><h3>{{loop.index}}. {{item.title}}</h3>
 <div class="meta">Publisher: {{item.source}} · {{item.published}}{% if item.publisher_domain %} · {{item.publisher_domain}}{% endif %}</div>
@@ -245,11 +246,12 @@ def research():
                 if not is_relevant_story(entry):
                     continue
                 publisher = entry.get("source", {}).get("title", "Publisher not identified").strip()
-                publisher_key = publisher.lower()
                 headline = entry.get("title", "").strip()
                 key = headline.lower()
                 source_url = entry.get("source", {}).get("href", "") or entry.get("source", {}).get("url", "")
                 publisher_domain = urlparse(source_url).netloc.lower().removeprefix("www.")
+                # Prefer publisher domain for deduplication; fall back to its label.
+                publisher_key = publisher_domain or publisher.lower()
                 # Exclude the original publisher by both display name and domain.
                 if original_source and publisher_key == original_source:
                     continue
@@ -261,11 +263,15 @@ def research():
                     continue
                 seen_titles.add(key)
                 seen_publishers.add(publisher_key)
+                published_day = ""
+                if entry.get("published_parsed"):
+                    published_day = time.strftime("%Y-%m-%d", entry.published_parsed)
                 results.append({
                     "title": headline,
                     "source": publisher,
                     "publisher_domain": publisher_domain,
                     "published": entry.get("published", "Date unavailable"),
+                    "published_day": published_day,
                     "summary": entry.get("summary", ""),
                     "link": entry.get("link", ""),
                 })
@@ -276,7 +282,7 @@ def research():
         return render_page(
             research_results=results,
             research_publisher_count=len(seen_publishers),
-            research_date_count=len({item["published"] for item in results if item["published"] != "Date unavailable"}),
+            research_date_count=len({item["published_day"] for item in results if item["published_day"]}),
             research_title=title,
             source_link=original_link,
         )
