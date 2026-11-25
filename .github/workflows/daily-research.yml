@@ -1,6 +1,11 @@
 name: Daily research shortlist
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "daily_research.py"
+      - ".github/workflows/daily-research.yml"
   schedule:
     - cron: "15 6 * * *"
   workflow_dispatch:
