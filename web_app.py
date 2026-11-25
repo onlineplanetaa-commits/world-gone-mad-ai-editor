@@ -1,5 +1,5 @@
 import os
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import feedparser
 from flask import Flask, render_template_string, request
@@ -22,6 +22,28 @@ REGIONS = {
     "Australia": ("AU", "EN"),
 }
 RANGES = {"Past 24 hours": "when:1d", "Past week": "when:7d", "Any time": ""}
+
+# Keep the Telegram channel independent from the user's website and remove
+# obvious gaming/entertainment noise from real-world research results.
+EXCLUDED_DOMAINS = ("ua-stena.info",)
+NOISE_TERMS = (
+    "gta 6", "grand theft auto", "video game", "gaming", "gameplay",
+    "playstation", "xbox", "nintendo", "steam game", "fortnite",
+    "minecraft", "call of duty", "game release", "gaming storyline",
+)
+
+def is_relevant_story(entry):
+    title = entry.get("title", "")
+    summary = entry.get("summary", "")
+    link = entry.get("link", "")
+    source = entry.get("source", {}).get("title", "")
+    text = " ".join((title, summary, source, link)).lower()
+    host = urlparse(link).netloc.lower()
+    if any(domain in host or domain in source.lower() for domain in EXCLUDED_DOMAINS):
+        return False
+    if any(term in text for term in NOISE_TERMS):
+        return False
+    return True
 
 PAGE = r"""
 <!doctype html>
@@ -62,7 +84,7 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 {% if searched %}
 <section><h2>Research results: {{category}}</h2>
 {% if stories %}
-<p class="muted">Found {{stories|length}} possible stories. Open the source and verify dates, evidence and independent coverage.</p>
+<p class="muted">Found {{stories|length}} candidate stories. Obvious gaming noise and ua-stena.info results are filtered out. {% if filtered_count %}{{filtered_count}} irrelevant results were skipped.{% endif %} Open each source and verify dates, evidence and independent coverage.</p>
 {% for s in stories %}
 <article class="story"><h3>{{loop.index}}. {{s.title}}</h3>
 <p>{{s.summary|striptags|truncate(500)}}</p>
@@ -102,7 +124,7 @@ def render_page(**kwargs):
         "categories": list(CATEGORIES), "regions": list(REGIONS), "ranges": list(RANGES),
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
-        "stories": [], "draft": None, "error": None, "source_link": None,
+        "stories": [], "filtered_count": 0, "draft": None, "error": None, "source_link": None,
         "checklist": None, "idea": "",
     }
     defaults.update(kwargs)
@@ -125,20 +147,32 @@ def search():
     region = region if region in REGIONS else "Worldwide"
     period = period if period in RANGES else "Past 24 hours"
     gl, hl = REGIONS[region]
-    query = " ".join(part for part in (CATEGORIES[category], RANGES[period]) if part)
+    query = " ".join(part for part in (CATEGORIES[category], RANGES[period], "-site:ua-stena.info", "-\"GTA 6\"", "-gaming", "-gameplay") if part)
     url = "https://news.google.com/rss/search?q=" + quote_plus(query) + f"&hl={hl.lower()}&gl={gl}&ceid={gl}:{hl.lower()}"
     try:
         parsed = feedparser.parse(url)
         stories = []
-        for entry in parsed.entries[:limit]:
+        seen_titles = set()
+        filtered_count = 0
+        for entry in parsed.entries:
+            if not is_relevant_story(entry):
+                filtered_count += 1
+                continue
+            title = entry.get("title", "Untitled").strip()
+            title_key = title.lower()
+            if title_key in seen_titles:
+                continue
+            seen_titles.add(title_key)
             stories.append({
-                "title": entry.get("title", "Untitled"),
+                "title": title,
                 "link": entry.get("link", ""),
                 "summary": entry.get("summary", ""),
                 "published": entry.get("published", "Date unavailable"),
                 "source": entry.get("source", {}).get("title", "Source not identified"),
             })
-        return render_page(category=category, region=region, period=period, limit=limit, searched=True, stories=stories)
+            if len(stories) >= limit:
+                break
+        return render_page(category=category, region=region, period=period, limit=limit, searched=True, stories=stories, filtered_count=filtered_count)
     except Exception as exc:
         return render_page(category=category, region=region, period=period, limit=limit, searched=True, error="News search failed: " + str(exc)), 502
 
