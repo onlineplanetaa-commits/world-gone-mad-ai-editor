@@ -11,9 +11,10 @@ from html.parser import HTMLParser
 import ipaddress
 import re
 import socket
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus, urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -255,6 +256,57 @@ class ArticleTextParser(HTMLParser):
         return text[:9000]
 
 
+
+def resolve_google_news_url(url):
+    """Resolve a Google News RSS redirect using Google's public article resolver."""
+    parsed = urlparse(url)
+    if parsed.hostname != "news.google.com" or "/articles/" not in parsed.path:
+        return url, "already a publisher URL"
+    article_id = parsed.path.rsplit("/", 1)[-1]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": "CONSENT=PENDING+987",
+    }
+    try:
+        request = Request("https://news.google.com/rss/articles/" + article_id, headers=headers)
+        with urlopen(request, timeout=12) as response:
+            page = response.read(2000000).decode("utf-8", errors="replace")
+        signature = re.search(r'data-n-a-sg="([^"]+)"', page)
+        timestamp = re.search(r'data-n-a-ts="(\d+)"', page)
+        if not signature or not timestamp:
+            return url, "Google redirect unresolved: signature unavailable"
+        inner = ["garturlreq",
+            [["X", "X", ["X", "X"], None, None, 1, 1, "US:en", None, 1, None, None, None, None, None, 0, 1],
+             "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0],
+            article_id, int(timestamp.group(1)), signature.group(1)]
+        outer = [[["Fbv4je", json.dumps(inner, separators=(",", ":"))]]]
+        body = urlencode({"f.req": json.dumps(outer, separators=(",", ":"))}).encode("utf-8")
+        post_headers = dict(headers)
+        post_headers.update({"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Origin": "https://news.google.com", "Referer": "https://news.google.com/", "X-Same-Domain": "1"})
+        request = Request("https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            data=body, headers=post_headers, method="POST")
+        with urlopen(request, timeout=12) as response:
+            payload = response.read(500000).decode("utf-8", errors="replace")
+        parts = payload.split("\n\n", 1)
+        if len(parts) != 2:
+            return url, "Google redirect unresolved: unexpected response"
+        frames = json.loads(parts[1])
+        frame = next((x for x in frames if isinstance(x, list) and len(x) > 2 and x[0] == "wrb.fr" and x[1] == "Fbv4je"), None)
+        if not frame or not frame[2]:
+            return url, "Google redirect unresolved: no destination"
+        result = json.loads(frame[2])
+        destination = result[1] if isinstance(result, list) and len(result) > 1 else ""
+        target = urlparse(destination)
+        if target.scheme not in ("http", "https") or not target.hostname or target.hostname == "news.google.com":
+            return url, "Google redirect unresolved: invalid destination"
+        return destination, "resolved"
+    except Exception as exc:
+        return url, f"Google redirect unresolved: {type(exc).__name__}"
+
+
+
 def fetch_article_text(url):
     """Fetch a public article page without bypassing paywalls or script barriers."""
     try:
@@ -393,13 +445,23 @@ def main():
 
     # Search for other publisher coverage for each shortlisted candidate.
     # These are leads to inspect, not proof of independent corroboration.
-    for story in unique[:MAX_STORIES]:
+    for index, story in enumerate(unique[:MAX_STORIES]):
         story["coverage"] = find_other_coverage(story)
-        story["article"] = fetch_article_text(story["link"])
-        # Read at most one additional publisher page; the others remain leads.
-        for lead in story["coverage"][:1]:
-            lead["article"] = fetch_article_text(lead["link"])
+        original_google_link = story["link"]
+        resolved_link, resolution_status = resolve_google_news_url(original_google_link)
+        story["google_link"] = original_google_link
+        story["link_resolution"] = resolution_status
+        story["link"] = resolved_link
+        story["article"] = fetch_article_text(resolved_link)
+        if index < 3 and story["coverage"]:
+            lead = story["coverage"][0]
+            lead_url, lead_resolution = resolve_google_news_url(lead["link"])
+            lead["link_resolution"] = lead_resolution
+            lead["link"] = lead_url
+            lead["article"] = fetch_article_text(lead_url) if lead_resolution == "resolved" else {"status": lead_resolution, "text": ""}
+            time.sleep(1)
         story["priority_score"], story["priority_reasons"] = score_research_priority(story)
+        time.sleep(1)
 
     local_now = now.astimezone(KYIV)
     date_label = local_now.strftime("%Y-%m-%d")
@@ -430,6 +492,7 @@ def main():
             f"- **Publisher:** {story['publisher']} ({story['domain'] or 'domain unavailable'})",
             f"- **Research priority:** {story.get('priority_score', 2)}/10 — {', '.join(story.get('priority_reasons', ['recent candidate']))}",
             f"- **Original report:** {story['link']}",
+            f"- **Google link resolution:** {story.get('link_resolution', 'not attempted')}",
             f"- **Article extraction:** {story.get('article', {}).get('status', 'not attempted')}",
             f"- **Resolved page:** {story.get('article', {}).get('resolved_url', 'not resolved')}",
             "",
