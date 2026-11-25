@@ -129,6 +129,10 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         # Require a meaningful title signal for the selected topic. This cuts
         # unrelated stories returned by broad Google News OR queries.
         title_lower = title.lower()
+        if title_lower.strip() in ("california extreme weather", "extreme weather california"):
+            continue
+        if "tbc_blox_images" in link.lower():
+            continue
         topic_signals = {
             "UFOs & unexplained": ("uap", "alien", "extraterrestrial", "unexplained aerial", "ufo sighting", "ufo encounter", "ufo over", "ufo footage", "ufo report", "ufo mystery", "mistaken for ufo"),
             "Strange events & creatures": ("creature", "monster", "beast", "cryptid", "mysterious", "strange", "unusual", "sighting"),
@@ -368,8 +372,8 @@ def fetch_article_text(url):
         parser = ArticleTextParser()
         parser.feed(payload.decode("utf-8", errors="replace"))
         text = parser.article_text()
-        if len(text) < 250:
-            return {"status": "limited: page blocked, scripted or no readable article text", "text": text, "resolved_url": resolved_url}
+        if len(text) < 350:
+            return {"status": "limited: short excerpt or no readable article body", "text": text, "resolved_url": resolved_url}
         return {"status": "extracted", "text": text, "resolved_url": resolved_url}
     except Exception as exc:
         return {"status": f"unavailable: {type(exc).__name__}", "text": ""}
