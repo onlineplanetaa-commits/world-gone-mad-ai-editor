@@ -182,6 +182,31 @@ def find_other_coverage(story):
     return leads
 
 
+def score_research_priority(story):
+    """Transparent editorial triage heuristic; never a truth or reliability score."""
+    score = 2
+    reasons = ["recent candidate"]
+    title = story.get("title", "")
+    summary = story.get("summary", "")
+    if len(title) >= 55:
+        score += 1
+        reasons.append("specific headline")
+    if len(summary) >= 180:
+        score += 2
+        reasons.append("substantive feed summary")
+    if re.search(r"\\b(earthquake|eruption|crash|encounter|sighting|discovery|attack|missile|explosion|creature|artifact|fossil|shipwreck)\\b", title, re.I):
+        score += 2
+        reasons.append("concrete event signal")
+    if story.get("domain") and story["domain"] != "news.google.com":
+        score += 1
+        reasons.append("publisher domain identified")
+    coverage_count = len(story.get("coverage", []))
+    if coverage_count:
+        score += min(coverage_count, 2)
+        reasons.append(f"{coverage_count} additional coverage lead(s)")
+    return min(score, 10), reasons
+
+
 def main():
     now = datetime.now(timezone.utc)
     cutoff = now - WINDOW
@@ -210,6 +235,7 @@ def main():
     # These are leads to inspect, not proof of independent corroboration.
     for story in unique[:MAX_STORIES]:
         story["coverage"] = find_other_coverage(story)
+        story["priority_score"], story["priority_reasons"] = score_research_priority(story)
 
     local_now = now.astimezone(KYIV)
     date_label = local_now.strftime("%Y-%m-%d")
@@ -224,6 +250,7 @@ def main():
         "Research candidates from public Google News RSS feeds, published in the last 24 hours.",
         "",
         "**Editorial status:** candidates only. Headlines and summaries are not verification. Open the original report, inspect the evidence, and seek independent coverage before drafting.",
+        "**Research priority is a transparent heuristic for triage, not an AI verdict, truth score or source-reliability rating. Additional coverage leads may be syndicated copies.**",
         "",
         f"**Candidates found:** {min(len(unique), MAX_STORIES)} of {len(unique)} unique results",
         "",
@@ -237,6 +264,7 @@ def main():
             f"- **Topic:** {story['topic']}",
             f"- **Published:** {published_local}",
             f"- **Publisher:** {story['publisher']} ({story['domain'] or 'domain unavailable'})",
+            f"- **Research priority:** {story.get('priority_score', 2)}/10 — {', '.join(story.get('priority_reasons', ['recent candidate']))}",
             f"- **Original report:** {story['link']}",
             "",
             story["summary"] or "_No summary supplied by the feed._",
