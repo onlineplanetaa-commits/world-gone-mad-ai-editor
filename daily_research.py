@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import calendar
+from difflib import SequenceMatcher
 import html
 import re
 from datetime import datetime, timedelta, timezone
@@ -225,7 +226,10 @@ def main():
     # Keep the shortlist from being overwhelmed by one broad category.
     for story in sorted(all_stories, key=lambda item: item["published"], reverse=True):
         key = re.sub(r"[^a-z0-9]+", " ", story["title"].lower()).strip()
-        if key in seen or topic_counts.get(story["topic"], 0) >= MAX_PER_TOPIC:
+        # Suppress near-identical headlines returned by overlapping topic feeds.
+        if key in seen or any(SequenceMatcher(None, key, previous).ratio() >= 0.84 for previous in seen):
+            continue
+        if topic_counts.get(story["topic"], 0) >= MAX_PER_TOPIC:
             continue
         seen.add(key)
         topic_counts[story["topic"]] = topic_counts.get(story["topic"], 0) + 1
