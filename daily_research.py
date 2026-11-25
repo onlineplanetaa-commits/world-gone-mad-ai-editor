@@ -6,6 +6,7 @@ from __future__ import annotations
 import calendar
 from difflib import SequenceMatcher
 import html
+import json
 from html.parser import HTMLParser
 import ipaddress
 import re
@@ -157,8 +158,27 @@ class ArticleTextParser(HTMLParser):
         self.paragraph_depth = 0
         self.paragraphs = []
         self.current = []
+        self.meta_description = ""
+        self.jsonld_scripts = []
+        self.collect_jsonld = False
+        self.jsonld_buffer = []
+        self.container_depth = 0
+        self.container_parts = []
 
     def handle_starttag(self, tag, attrs):
+        attr = dict(attrs)
+        marker = " ".join([tag, attr.get("id", ""), attr.get("class", ""), attr.get("itemprop", "")]).lower()
+        if tag in ("article", "main") or attr.get("itemprop", "").lower() == "articlebody" or any(token in marker for token in ("article-body", "articlebody", "story-body", "post-content", "entry-content", "article__content")):
+            self.container_depth += 1
+        if tag == "meta":
+            key = (attr.get("property") or attr.get("name") or "").lower()
+            value = attr.get("content", "")
+            if key in ("description", "og:description", "twitter:description") and len(value) > len(self.meta_description):
+                self.meta_description = clean_text(value)
+        if tag == "script" and attr.get("type", "").lower() == "application/ld+json":
+            self.collect_jsonld = True
+            self.jsonld_buffer = []
+            return
         if tag in self.SKIP_TAGS:
             self.skip_depth += 1
             return
@@ -171,6 +191,11 @@ class ArticleTextParser(HTMLParser):
             self.current = []
 
     def handle_endtag(self, tag):
+        if tag == "script" and self.collect_jsonld:
+            self.jsonld_scripts.append("".join(self.jsonld_buffer))
+            self.collect_jsonld = False
+            self.jsonld_buffer = []
+            return
         if tag in self.SKIP_TAGS and self.skip_depth:
             self.skip_depth -= 1
             return
@@ -184,15 +209,50 @@ class ArticleTextParser(HTMLParser):
             self.current = []
         if tag in self.CONTENT_TAGS and self.content_depth:
             self.content_depth -= 1
+        if tag in ("article", "main") and self.container_depth:
+            self.container_depth -= 1
 
     def handle_data(self, data):
+        if self.collect_jsonld:
+            self.jsonld_buffer.append(data)
         if not self.skip_depth and self.paragraph_depth:
             self.current.append(data)
+        if not self.skip_depth and self.container_depth and data.strip():
+            self.container_parts.append(data.strip())
+
+    def _article_bodies(self, value):
+        found = []
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key.lower() == "articlebody" and isinstance(item, str):
+                    found.append(clean_text(item))
+                else:
+                    found.extend(self._article_bodies(item))
+        elif isinstance(value, list):
+            for item in value:
+                found.extend(self._article_bodies(item))
+        return found
 
     def article_text(self):
         preferred = [p for in_article, p in self.paragraphs if in_article]
         chosen = preferred if preferred else [p for _, p in self.paragraphs]
-        return "\\n\\n".join(chosen)[:9000]
+        text = "\\n\\n".join(chosen)
+        if len(text) >= 250:
+            return text[:9000]
+        container_text = clean_text(" ".join(self.container_parts))
+        if len(container_text) >= 250:
+            return container_text[:9000]
+        for raw in self.jsonld_scripts:
+            try:
+                bodies = self._article_bodies(json.loads(raw))
+                body = max(bodies, key=len, default="")
+                if len(body) >= 250:
+                    return body[:9000]
+            except Exception:
+                pass
+        if len(self.meta_description) >= 80:
+            return self.meta_description[:2000]
+        return text[:9000]
 
 
 def fetch_article_text(url):
