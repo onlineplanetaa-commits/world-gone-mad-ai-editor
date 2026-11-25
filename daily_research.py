@@ -35,6 +35,9 @@ BLOCKED_TERMS = (
     "minecraft", "call of duty", "game release", "gaming storyline",
     "conflict of interest", "opinion |", "film review", "movie review",
     "book review", "panel discussion", "box office", "tv review",
+    "full moon calendar", "moon phases", "forum to focus", "supports military families",
+    "ufo spark", "ufo device", "ufo technology", "green path review",
+    "stock", "shares", "ticker", "earnings", "investor",
 )
 
 
@@ -94,14 +97,20 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         # unrelated stories returned by broad Google News OR queries.
         title_lower = title.lower()
         topic_signals = {
-            "UFOs & unexplained": ("ufo", "uap", "alien", "extraterrestrial", "unexplained aerial"),
+            "UFOs & unexplained": ("uap", "alien", "extraterrestrial", "unexplained aerial", "ufo sighting", "ufo encounter", "ufo over", "ufo footage", "ufo report", "ufo mystery", "mistaken for ufo"),
             "Strange events & creatures": ("creature", "monster", "beast", "cryptid", "mysterious", "strange", "unusual", "sighting"),
             "Disasters & extreme events": ("earthquake", "volcano", "eruption", "flood", "hurricane", "tornado", "wildfire", "tsunami", "landslide", "disaster", "extreme weather"),
             "Wars & global events": ("war", "missile", "drone", "airstrike", "airspace", "attack", "invasion", "ceasefire", "troops", "army", "navy", "bombing", "military", "defense", "weapons", "frontline", "casualties", "soldiers", "air defense", "shelling", "occupation", "hostilities"),
-            "Science & discoveries": ("discovery", "breakthrough", "research", "scientist", "study", "nasa", "space mission", "astronomy", "telescope", "scientific"),
-            "Mysteries & archaeology": ("archaeology", "archaeological", "ancient", "artifact", "mystery", "mysterious", "lost civilization", "shipwreck", "ruins", "excavation"),
+            "Science & discoveries": ("discovery", "breakthrough", "researchers", "scientists", "study finds", "new study", "nasa", "space mission", "astronomers", "telescope", "scientific discovery", "experiment", "new species", "fossil"),
+            "Mysteries & archaeology": ("archaeology", "archaeological", "ancient discovery", "ancient artifact", "mystery", "mysterious discovery", "lost civilization", "shipwreck", "ruins", "excavation", "hidden chamber", "buried city"),
         }
         if not any(signal in title_lower for signal in topic_signals.get(topic, ())):
+            continue
+        if any(term in title_lower for term in (
+            "calendar", "horoscope", "weekly forecast", "daily forecast",
+            "forum to focus", "panel discussion", "supports military families",
+            "ufo spark", "device enters", "green path review",
+        )):
             continue
 
         publisher = clean_text(source.get("title", "")) if hasattr(source, "get") else ""
