@@ -290,6 +290,26 @@ def research():
     except Exception as exc:
         return render_page(error="Additional coverage search failed: " + str(exc), source_link=original_link), 502
 
+@app.post("/analyze")
+def analyze_coverage():
+    title = request.form.get("title", "").strip()
+    summary = request.form.get("summary", "").strip()
+    source_link = request.form.get("source_link", "").strip()
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        return render_page(error="AI coverage analysis requires OPENAI_API_KEY in Render. News search works without it.", source_link=source_link)
+    try:
+        records = json.loads(request.form.get("coverage_json", "[]"))
+        if not isinstance(records, list) or not records:
+            return render_page(error="No additional coverage records to compare.", source_link=source_link)
+        safe_records = [{"publisher": str(x.get("source", ""))[:120], "date": str(x.get("published", ""))[:80], "headline": str(x.get("title", ""))[:400], "summary": str(x.get("summary", ""))[:1800]} for x in records[:10] if isinstance(x, dict)]
+        from openai import OpenAI
+        prompt = "Compare this original news report with the additional feed summaries. Identify repeated claims, differences, unknowns and checks needed. Do not invent facts. Do not treat repeated coverage as independent verification. Say when summaries are insufficient. Original headline: " + title + "\nOriginal summary: " + summary + "\nAdditional records: " + json.dumps(safe_records, ensure_ascii=False)
+        response = OpenAI(api_key=api_key).responses.create(model="gpt-4.1-mini", input=prompt)
+        return render_page(draft=response.output_text.strip(), source_link=source_link)
+    except Exception as exc:
+        return render_page(error="Coverage analysis failed: " + str(exc), source_link=source_link), 500
+
 @app.post("/draft")
 def make_draft():
     title = request.form.get("title", "")
