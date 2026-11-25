@@ -77,7 +77,7 @@ def fetch_article_text(url):
             for address in addresses:
                 if not ipaddress.ip_address(address[4][0]).is_global:
                     return "", "The article host resolved to a non-public address; request blocked."
-            response = requests.get(current_url, headers=headers, timeout=(5, 12), allow_redirects=False, stream=True)
+            response = requests.get(current_url, headers=headers, timeout=(3, 4), allow_redirects=False, stream=True)
             if response.is_redirect or response.is_permanent_redirect:
                 location = response.headers.get("Location", "")
                 response.close()
@@ -387,7 +387,7 @@ def extract_articles():
             records = []
         extracted_original, original_error = fetch_article_text(source_link) if source_link else ("", "No original article URL was supplied.")
         extracted_results = []
-        for item in records[:10]:
+        for item in records[:3]:
             if not isinstance(item, dict):
                 continue
             article_text, extraction_error = fetch_article_text(str(item.get("link", "")))
@@ -402,7 +402,7 @@ def extract_articles():
                 "extraction_error": extraction_error,
             })
         state = {
-            "research_results": records[:10], "research_title": title,
+            "research_results": records[:3], "research_title": title,
             "original_summary": summary,
             "research_publisher_count": len({str(x.get("publisher_domain") or x.get("source", "")) for x in records if isinstance(x, dict)}),
             "research_date_count": len({str(x.get("published", ""))[:10] for x in records if isinstance(x, dict) and x.get("published")}),
