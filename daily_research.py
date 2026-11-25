@@ -283,16 +283,17 @@ def fetch_article_text(url):
                     return {"status": "skipped: redirect to non-public address", "text": ""}
             except Exception:
                 return {"status": "unavailable: redirect host lookup failed", "text": ""}
+            resolved_url = response.geturl()
             content_type = response.headers.get("Content-Type", "")
             if "html" not in content_type.lower():
-                return {"status": "unavailable: not an HTML page", "text": ""}
+                return {"status": "unavailable: not an HTML page", "text": "", "resolved_url": resolved_url}
             payload = response.read(1_000_000)
         parser = ArticleTextParser()
         parser.feed(payload.decode("utf-8", errors="replace"))
         text = parser.article_text()
         if len(text) < 250:
-            return {"status": "limited: page blocked, scripted or no readable article text", "text": text}
-        return {"status": "extracted", "text": text}
+            return {"status": "limited: page blocked, scripted or no readable article text", "text": text, "resolved_url": resolved_url}
+        return {"status": "extracted", "text": text, "resolved_url": resolved_url}
     except Exception as exc:
         return {"status": f"unavailable: {type(exc).__name__}", "text": ""}
 
@@ -430,6 +431,7 @@ def main():
             f"- **Research priority:** {story.get('priority_score', 2)}/10 — {', '.join(story.get('priority_reasons', ['recent candidate']))}",
             f"- **Original report:** {story['link']}",
             f"- **Article extraction:** {story.get('article', {}).get('status', 'not attempted')}",
+            f"- **Resolved page:** {story.get('article', {}).get('resolved_url', 'not resolved')}",
             "",
             story["summary"] or "_No summary supplied by the feed._",
             "",
@@ -439,7 +441,7 @@ def main():
             "",
             f"**Other coverage leads ({len(story.get('coverage', []))}; check whether they are independent):**",
             *(
-                [f"- {item['publisher']} ({item['domain']}): [{item['title']}]({item['link']}) — article: {item.get('article', {}).get('status', 'not fetched')}" for item in story.get("coverage", [])]
+                [f"- {item['publisher']} ({item['domain']}): [{item['title']}]({item['link']}) — article: {item.get('article', {}).get('status', 'not fetched')}\n\n  Resolved page: {item.get('article', {}).get('resolved_url', 'not resolved')}\n\n  {(item.get('article', {}).get('text', '')[:900] or 'No readable article text extracted.')}" for item in story.get("coverage", [])]
                 or ["- No additional publisher leads found by the title search."]
             ),
             "",
