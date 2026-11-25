@@ -1,0 +1,4 @@
+flask>=3.0,<4.0
+feedparser>=6.0,<7.0
+openai>=1.40,<3.0
+gunicorn>=22.0,<24.0
