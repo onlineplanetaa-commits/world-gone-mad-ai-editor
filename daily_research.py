@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Build a daily, human-reviewed World Gone Mad research shortlist from Google News RSS."""
+
+from __future__ import annotations
+
+import calendar
+import html
+import re
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import quote_plus, urlparse
+from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
+
+import feedparser
+
+KYIV = ZoneInfo("Europe/Kyiv")
+OUTPUT_DIR = Path("daily-shortlist")
+MAX_STORIES = 15
+WINDOW = timedelta(hours=24)
+
+TOPICS = {
+    "UFOs & unexplained": '("UFO" OR "UAP" OR "unexplained aerial" OR "alien encounter")',
+    "Strange events & creatures": '("mysterious creature" OR "strange creature" OR "unusual phenomenon" OR "mysterious sighting")',
+    "Disasters & extreme events": '("natural disaster" OR earthquake OR volcano OR extreme weather OR "strange natural phenomenon")',
+    "Wars & global events": '("war" OR conflict OR missile OR military OR geopolitical)',
+    "Science & discoveries": '("scientific discovery" OR breakthrough OR space OR astronomy OR archaeology)',
+    "Mysteries & archaeology": '("archaeological mystery" OR ancient discovery OR unexplained mystery OR lost civilization)',
+}
+
+BLOCKED_TERMS = (
+    "gta 6", "grand theft auto", "video game", "gaming", "gameplay",
+    "playstation", "xbox", "nintendo", "steam game", "fortnite",
+    "minecraft", "call of duty", "game release", "gaming storyline",
+)
+
+
+def clean_text(value: str) -> str:
+    value = re.sub(r"<[^>]+>", " ", value or "")
+    value = html.unescape(value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def published_datetime(entry):
+    parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+    if not parsed:
+        return None
+    return datetime.fromtimestamp(calendar.timegm(parsed), tz=timezone.utc)
+
+
+def get_domain(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def fetch_topic(topic: str, query: str, cutoff: datetime):
+    rss_url = (
+        "https://news.google.com/rss/search?q="
+        + quote_plus(query + " when:1d")
+        + "&hl=en&gl=US&ceid=US:en"
+    )
+    request = Request(
+        rss_url,
+        headers={"User-Agent": "WorldGoneMadResearch/1.0 (daily public RSS research)"},
+    )
+    with urlopen(request, timeout=20) as response:
+        payload = response.read(2_000_000)
+    feed = feedparser.parse(payload)
+    stories = []
+
+    for entry in feed.entries:
+        title = clean_text(entry.get("title", ""))
+        link = entry.get("link", "")
+        summary = clean_text(entry.get("summary", ""))
+        published = published_datetime(entry)
+        domain = get_domain(link)
+        haystack = (title + " " + summary).lower()
+
+        if not title or not link or not published or published < cutoff:
+            continue
+        if domain == "ua-stena.info" or domain.endswith(".ua-stena.info"):
+            continue
+        if any(term in haystack for term in BLOCKED_TERMS):
+            continue
+
+        source = entry.get("source", {})
+        publisher = clean_text(source.get("title", "")) if hasattr(source, "get") else ""
+        if not publisher:
+            publisher = domain or "Unknown publisher"
+
+        stories.append({
+            "topic": topic,
+            "title": title,
+            "link": link,
+            "summary": summary[:650],
+            "publisher": publisher,
+            "domain": domain,
+            "published": published,
+        })
+
+    return stories
+
+
+def main():
+    now = datetime.now(timezone.utc)
+    cutoff = now - WINDOW
+    all_stories = []
+    errors = []
+
+    for topic, query in TOPICS.items():
+        try:
+            all_stories.extend(fetch_topic(topic, query, cutoff))
+        except Exception as exc:
+            errors.append(f"{topic}: {type(exc).__name__}: {exc}")
+
+    seen = set()
+    unique = []
+    for story in sorted(all_stories, key=lambda item: item["published"], reverse=True):
+        key = re.sub(r"[^a-z0-9]+", " ", story["title"].lower()).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(story)
+
+    local_now = now.astimezone(KYIV)
+    date_label = local_now.strftime("%Y-%m-%d")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output = OUTPUT_DIR / f"{date_label}.md"
+
+    lines = [
+        f"# World Gone Mad — Daily Research Shortlist ({date_label})",
+        "",
+        f"Generated: {local_now.strftime('%Y-%m-%d %H:%M %Z')}",
+        "",
+        "Research candidates from public Google News RSS feeds, published in the last 24 hours.",
+        "",
+        "**Editorial status:** candidates only. Headlines and summaries are not verification. Open the original report, inspect the evidence, and seek independent coverage before drafting.",
+        "",
+        f"**Candidates found:** {min(len(unique), MAX_STORIES)} of {len(unique)} unique results",
+        "",
+    ]
+
+    for index, story in enumerate(unique[:MAX_STORIES], 1):
+        published_local = story["published"].astimezone(KYIV).strftime("%Y-%m-%d %H:%M %Z")
+        lines.extend([
+            f"## {index}. {story['title']}",
+            "",
+            f"- **Topic:** {story['topic']}",
+            f"- **Published:** {published_local}",
+            f"- **Publisher:** {story['publisher']} ({story['domain'] or 'domain unavailable'})",
+            f"- **Original report:** {story['link']}",
+            "",
+            story["summary"] or "_No summary supplied by the feed._",
+            "",
+        ])
+
+    if not unique:
+        lines.extend(["No qualifying stories were found in the feeds during this run.", ""])
+
+    if errors:
+        lines.extend(["## Feed warnings", ""])
+        lines.extend(f"- {error}" for error in errors)
+        lines.extend(["", "This shortlist may be incomplete because one or more feeds failed.", ""])
+
+    lines.extend([
+        "---",
+        "",
+        "This file is an automatically collected research queue, not a fact-checked news report. No Telegram post is published automatically.",
+        "",
+    ])
+    output.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote {output} with {min(len(unique), MAX_STORIES)} candidates; {len(errors)} feed errors.")
+
+
+if __name__ == "__main__":
+    main()
