@@ -212,9 +212,17 @@ def fetch_article_text(url):
             return {"status": "unavailable: host lookup failed", "text": ""}
         request = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; WorldGoneMadResearch/1.0)", "Accept": "text/html"})
         with urlopen(request, timeout=8) as response:
-            final_host = (urlparse(response.geturl()).hostname or "").lower()
-            if final_host != host:
-                return {"status": "unavailable: redirected to another host", "text": ""}
+            final_url = urlparse(response.geturl())
+            final_host = (final_url.hostname or "").lower()
+            if final_url.scheme not in ("http", "https") or not final_host:
+                return {"status": "skipped: unsafe redirect", "text": ""}
+            try:
+                final_addresses = socket.getaddrinfo(final_host, final_url.port or (443 if final_url.scheme == "https" else 80))
+                final_ips = [ipaddress.ip_address(item[4][0].split("%")[0]) for item in final_addresses]
+                if not final_ips or any(not ip.is_global for ip in final_ips):
+                    return {"status": "skipped: redirect to non-public address", "text": ""}
+            except Exception:
+                return {"status": "unavailable: redirect host lookup failed", "text": ""}
             content_type = response.headers.get("Content-Type", "")
             if "html" not in content_type.lower():
                 return {"status": "unavailable: not an HTML page", "text": ""}
