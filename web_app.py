@@ -105,6 +105,7 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <div class="checks"><strong>Editorial checks</strong><p>☐ Confirm the original publication</p><p>☐ Check the event date and location</p><p>☐ Compare with another reliable source</p><p>☐ Separate confirmed facts from claims</p></div>
 <form method="post" action="/research">
 <input type="hidden" name="title" value="{{s.title}}">
+<input type="hidden" name="summary" value="{{s.summary|striptags}}">
 <input type="hidden" name="source" value="{{s.source}}">
 <input type="hidden" name="source_domain" value="{{s.publisher_domain}}">
 <input type="hidden" name="link" value="{{s.link}}">
@@ -138,6 +139,14 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 {% if item.link %}<a class="button" href="{{item.link}}" target="_blank" rel="noopener noreferrer">Open coverage</a>{% endif %}
 </article>
 {% endfor %}
+<form method="post" action="/analyze">
+<input type="hidden" name="title" value="{{research_title}}">
+<input type="hidden" name="summary" value="{{original_summary}}">
+<input type="hidden" name="coverage_json" value="{{research_results|tojson|forceescape}}">
+<input type="hidden" name="source_link" value="{{source_link}}">
+<button type="submit">Analyze coverage with AI</button>
+</form>
+<p class="muted">Requires OPENAI_API_KEY. Compares feed summaries only; it does not independently verify the event.</p>
 {% else %}
 <div class="notice">No additional matching coverage was found in Google News. This does not prove the story is false; try searching distinctive names or phrases manually.</div>
 {% endif %}
@@ -162,7 +171,7 @@ def render_page(**kwargs):
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
         "stories": [], "filtered_count": 0, "draft": None, "error": None, "source_link": None,
-        "research_results": None, "research_title": "", "research_publisher_count": 0, "research_date_count": 0,
+        "research_results": None, "research_title": "", "original_summary": "", "research_publisher_count": 0, "research_date_count": 0,
         "checklist": None, "idea": "",
     }
     defaults.update(kwargs)
@@ -220,6 +229,7 @@ def research():
     original_source = request.form.get("source", "").strip().lower()
     original_link = request.form.get("link", "").strip()
     original_domain = request.form.get("source_domain", "").strip().lower().removeprefix("www.")
+    original_summary = request.form.get("summary", "").strip()
     if not title:
         return render_page(error="No story title was supplied for the additional search.")
     # Google News appends publisher names to many headlines ("Headline - Publisher").
@@ -285,6 +295,7 @@ def research():
             research_publisher_count=len(seen_publishers),
             research_date_count=len({item["published_day"] for item in results if item["published_day"]}),
             research_title=title,
+            original_summary=original_summary,
             source_link=original_link,
         )
     except Exception as exc:
