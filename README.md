@@ -23,15 +23,17 @@ A research and editorial assistant for the public Telegram channel **World Gone 
 The Render version uses Flask and simple HTML pages rather than the Streamlit interface.
 
 1. Sign in at https://render.com/ with GitHub.
-2. Choose **New** → **Blueprint** (or **New** → **Web Service**).
+2. Choose **New** → **Blueprint**.
 3. Connect the repository `onlineplanetaa-commits/world-gone-mad-ai-editor`.
-4. If using Blueprint, Render reads `render.yaml` and configures the free web service.
-5. If creating a Web Service manually, use:
-   - Runtime: Python
-   - Build command: `pip install -r requirements.txt`
-   - Start command: `gunicorn web_app:app`
-   - Health check path: `/health`
-   - Instance type: Free
+4. Keep branch `main`; Render reads `render.yaml` automatically.
+5. Review the single web service and click **Deploy Blueprint**.
+
+If creating a Web Service manually instead, use:
+- Runtime: Python
+- Build command: `pip install -r requirements-render.txt`
+- Start command: `gunicorn web_app:app`
+- Health check path: `/health`
+- Instance type: Free
 
 Free Render services sleep after 15 minutes without traffic and may take about a minute to wake. Free services have other usage limits; see https://render.com/docs/free.
 
