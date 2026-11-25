@@ -91,6 +91,12 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <div class="meta">Published: {{s.published}} · Feed source: {{s.source}}</div>
 {% if s.link %}<p><a class="button" href="{{s.link}}" target="_blank" rel="noopener noreferrer">Open original report</a></p>{% endif %}
 <div class="checks"><strong>Editorial checks</strong><p>☐ Confirm the original publication</p><p>☐ Check the event date and location</p><p>☐ Compare with another reliable source</p><p>☐ Separate confirmed facts from claims</p></div>
+<form method="post" action="/research">
+<input type="hidden" name="title" value="{{s.title}}">
+<input type="hidden" name="source" value="{{s.source}}">
+<input type="hidden" name="link" value="{{s.link}}">
+<button type="submit">Find other coverage</button>
+</form>
 <details><summary>Prepare a Telegram draft from this story</summary>
 <form method="post" action="/draft">
 <input type="hidden" name="title" value="{{s.title}}">
@@ -104,6 +110,23 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <button type="submit">Generate draft</button></form></details></article>
 {% endfor %}
 {% else %}<div class="notice">No results were returned. Try another topic or a wider time range.</div>{% endif %}
+</section>
+{% endif %}
+{% if research_results is not none %}
+<section class="panel"><h2>Additional coverage to inspect</h2>
+<h3>{{research_title}}</h3>
+<p class="muted">These are search leads, not verified independent confirmation. Check whether each report has its own evidence and is not merely repeating the original story.</p>
+{% if research_results %}
+{% for item in research_results %}
+<article class="story"><h3>{{loop.index}}. {{item.title}}</h3>
+<div class="meta">Publisher: {{item.source}} · {{item.published}}</div>
+{% if item.summary %}<p>{{item.summary|striptags|truncate(400)}}</p>{% endif %}
+{% if item.link %}<a class="button" href="{{item.link}}" target="_blank" rel="noopener noreferrer">Open coverage</a>{% endif %}
+</article>
+{% endfor %}
+{% else %}
+<div class="notice">No additional matching coverage was found in Google News. This does not prove the story is false; try searching distinctive names or phrases manually.</div>
+{% endif %}
 </section>
 {% endif %}
 {% if draft %}
@@ -125,6 +148,7 @@ def render_page(**kwargs):
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
         "stories": [], "filtered_count": 0, "draft": None, "error": None, "source_link": None,
+        "research_results": None, "research_title": "",
         "checklist": None, "idea": "",
     }
     defaults.update(kwargs)
@@ -175,6 +199,52 @@ def search():
         return render_page(category=category, region=region, period=period, limit=limit, searched=True, stories=stories, filtered_count=filtered_count)
     except Exception as exc:
         return render_page(category=category, region=region, period=period, limit=limit, searched=True, error="News search failed: " + str(exc)), 502
+
+@app.post("/research")
+def research():
+    title = request.form.get("title", "").strip()
+    original_source = request.form.get("source", "").strip().lower()
+    original_link = request.form.get("link", "").strip()
+    if not title:
+        return render_page(error="No story title was supplied for the additional search.")
+    # Search the exact headline in Google News to locate other publishers.
+    query = '"' + title.replace('"', ' ') + '" -site:ua-stena.info'
+    url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en&gl=US&ceid=US:en"
+    try:
+        parsed = feedparser.parse(url)
+        results = []
+        seen = set()
+        for entry in parsed.entries:
+            if not is_relevant_story(entry):
+                continue
+            publisher = entry.get("source", {}).get("title", "Publisher not identified").strip()
+            publisher_key = publisher.lower()
+            headline = entry.get("title", "").strip()
+            key = headline.lower()
+            if not headline or key in seen:
+                continue
+            # Do not count the original publisher or the original link as another source.
+            if original_source and publisher_key == original_source:
+                continue
+            if original_link and entry.get("link", "").split("?")[0] == original_link.split("?")[0]:
+                continue
+            seen.add(key)
+            results.append({
+                "title": headline,
+                "source": publisher,
+                "published": entry.get("published", "Date unavailable"),
+                "summary": entry.get("summary", ""),
+                "link": entry.get("link", ""),
+            })
+            if len(results) >= 10:
+                break
+        return render_page(
+            research_results=results,
+            research_title=title,
+            source_link=original_link,
+        )
+    except Exception as exc:
+        return render_page(error="Additional coverage search failed: " + str(exc), source_link=original_link), 502
 
 @app.post("/draft")
 def make_draft():
