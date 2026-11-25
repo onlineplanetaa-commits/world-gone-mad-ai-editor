@@ -129,7 +129,7 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         # Require a meaningful title signal for the selected topic. This cuts
         # unrelated stories returned by broad Google News OR queries.
         title_lower = title.lower()
-        if title_lower.strip() in ("california extreme weather", "extreme weather california"):
+        if title_lower.strip().startswith(("california extreme weather", "extreme weather california")):
             continue
         if "tbc_blox_images" in link.lower():
             continue
