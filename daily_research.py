@@ -141,6 +141,47 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
     return stories
 
 
+def find_other_coverage(story):
+    """Find additional publisher leads; syndication is not proof of independence."""
+    query = '"' + story["title"][:180] + '" when:7d'
+    rss_url = (
+        "https://news.google.com/rss/search?q="
+        + quote_plus(query)
+        + "&hl=en&gl=US&ceid=US:en"
+    )
+    request = Request(
+        rss_url,
+        headers={"User-Agent": "WorldGoneMadResearch/1.0 (public RSS cross-check)"},
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            feed = feedparser.parse(response.read(800_000))
+    except Exception:
+        return []
+
+    leads = []
+    seen_domains = {story.get("domain", "")}
+    for entry in feed.entries:
+        source = entry.get("source", {})
+        source_url = source.get("href", "") if hasattr(source, "get") else ""
+        domain = get_domain(source_url)
+        title = clean_text(entry.get("title", ""))
+        link = entry.get("link", "")
+        if not domain or domain == "news.google.com" or domain in seen_domains or not title or not link:
+            continue
+        seen_domains.add(domain)
+        publisher = clean_text(source.get("title", "")) if hasattr(source, "get") else ""
+        leads.append({
+            "publisher": publisher or domain,
+            "domain": domain,
+            "title": title,
+            "link": link,
+        })
+        if len(leads) >= 4:
+            break
+    return leads
+
+
 def main():
     now = datetime.now(timezone.utc)
     cutoff = now - WINDOW
@@ -164,6 +205,11 @@ def main():
         seen.add(key)
         topic_counts[story["topic"]] = topic_counts.get(story["topic"], 0) + 1
         unique.append(story)
+
+    # Search for other publisher coverage for each shortlisted candidate.
+    # These are leads to inspect, not proof of independent corroboration.
+    for story in unique[:MAX_STORIES]:
+        story["coverage"] = find_other_coverage(story)
 
     local_now = now.astimezone(KYIV)
     date_label = local_now.strftime("%Y-%m-%d")
@@ -194,6 +240,12 @@ def main():
             f"- **Original report:** {story['link']}",
             "",
             story["summary"] or "_No summary supplied by the feed._",
+            "",
+            f"**Other coverage leads ({len(story.get('coverage', []))}; check whether they are independent):**",
+            *(
+                [f"- {item['publisher']} ({item['domain']}): [{item['title']}]({item['link']})" for item in story.get("coverage", [])]
+                or ["- No additional publisher leads found by the title search."]
+            ),
             "",
         ])
 
