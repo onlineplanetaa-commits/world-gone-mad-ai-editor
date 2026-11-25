@@ -45,6 +45,16 @@ def is_relevant_story(entry):
         return False
     return True
 
+def headline_for_search(title, publisher=""):
+    """Remove Google News' trailing publisher suffix before searching coverage."""
+    cleaned = title.strip()
+    publisher = publisher.strip()
+    if publisher:
+        suffix = " - " + publisher
+        if cleaned.lower().endswith(suffix.lower()):
+            cleaned = cleaned[:-len(suffix)].strip()
+    return cleaned.strip(' "“”')
+
 PAGE = r"""
 <!doctype html>
 <html lang="en">
@@ -208,10 +218,15 @@ def research():
     original_link = request.form.get("link", "").strip()
     if not title:
         return render_page(error="No story title was supplied for the additional search.")
-    # Run an exact-title search and a broader keyword search. Google News
-    # results are leads only; matching coverage is not proof of independence.
-    clean_title = title.replace('"', ' ')
-    words = [word for word in clean_title.split() if len(word) > 3]
+    # Google News appends publisher names to many headlines ("Headline - Publisher").
+    # Strip that suffix so exact and keyword searches target the actual story.
+    # Results remain discovery leads, not proof of independent reporting.
+    clean_title = headline_for_search(title, request.form.get("source", ""))
+    clean_title = clean_title.replace('"', ' ')
+    stop_words = {"about", "after", "against", "could", "from", "have", "into", "more",
+                  "mysterious", "report", "says", "that", "their", "there", "these",
+                  "this", "what", "when", "where", "which", "while", "with", "would"}
+    words = [word for word in clean_title.split() if len(word) > 3 and word.lower() not in stop_words]
     broad_query = " ".join(words[:8]) if words else clean_title
     queries = [
         '"' + clean_title + '" -site:ua-stena.info',
