@@ -152,6 +152,9 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 {% endif %}
 </section>
 {% endif %}
+{% if analysis_report %}
+<section class="panel"><h2>AI coverage analysis</h2><div class="draft">{{analysis_report}}</div><p class="muted">Preliminary comparison of feed summaries only. This is not independent verification or a fact-check.</p>{% if source_link %}<a href="{{source_link}}" target="_blank" rel="noopener noreferrer">Open original report</a>{% endif %}</section>
+{% endif %}
 {% if draft %}
 <section class="panel"><h2>Draft for manual review</h2><div class="draft">{{draft}}</div><p class="muted">Review every factual claim before manually posting. The source link stays separate.</p>{% if source_link %}<a href="{{source_link}}" target="_blank" rel="noopener noreferrer">Open source report</a>{% endif %}</section>
 {% endif %}
@@ -170,7 +173,7 @@ def render_page(**kwargs):
         "categories": list(CATEGORIES), "regions": list(REGIONS), "ranges": list(RANGES),
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
-        "stories": [], "filtered_count": 0, "draft": None, "error": None, "source_link": None,
+        "stories": [], "filtered_count": 0, "draft": None, "analysis_report": None, "error": None, "source_link": None,
         "research_results": None, "research_title": "", "original_summary": "", "research_publisher_count": 0, "research_date_count": 0,
         "checklist": None, "idea": "",
     }
@@ -317,7 +320,7 @@ def analyze_coverage():
         from openai import OpenAI
         prompt = "Compare this original news report with the additional feed summaries. Identify repeated claims, differences, unknowns and checks needed. Do not invent facts. Do not treat repeated coverage as independent verification. Say when summaries are insufficient. Original headline: " + title + "\nOriginal summary: " + summary + "\nAdditional records: " + json.dumps(safe_records, ensure_ascii=False)
         response = OpenAI(api_key=api_key).responses.create(model="gpt-4.1-mini", input=prompt)
-        return render_page(draft=response.output_text.strip(), source_link=source_link)
+        return render_page(analysis_report=response.output_text.strip(), source_link=source_link)
     except Exception as exc:
         return render_page(error="Coverage analysis failed: " + str(exc), source_link=source_link), 500
 
