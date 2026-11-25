@@ -17,6 +17,7 @@ import feedparser
 KYIV = ZoneInfo("Europe/Kyiv")
 OUTPUT_DIR = Path("daily-shortlist")
 MAX_STORIES = 15
+MAX_PER_TOPIC = 4
 WINDOW = timedelta(hours=24)
 
 TOPICS = {
@@ -32,6 +33,8 @@ BLOCKED_TERMS = (
     "gta 6", "grand theft auto", "video game", "gaming", "gameplay",
     "playstation", "xbox", "nintendo", "steam game", "fortnite",
     "minecraft", "call of duty", "game release", "gaming storyline",
+    "conflict of interest", "opinion |", "film review", "movie review",
+    "book review", "panel discussion", "box office", "tv review",
 )
 
 
@@ -94,7 +97,7 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
             "UFOs & unexplained": ("ufo", "uap", "alien", "extraterrestrial", "unexplained aerial"),
             "Strange events & creatures": ("creature", "monster", "beast", "cryptid", "mysterious", "strange", "unusual", "sighting"),
             "Disasters & extreme events": ("earthquake", "volcano", "eruption", "flood", "hurricane", "tornado", "wildfire", "tsunami", "landslide", "disaster", "extreme weather"),
-            "Wars & global events": ("war", "conflict", "missile", "drone", "airstrike", "airspace", "attack", "invasion", "ceasefire", "troops", "army", "navy", "bombing", "military operation", "strike"),
+            "Wars & global events": ("war", "missile", "drone", "airstrike", "airspace", "attack", "invasion", "ceasefire", "troops", "army", "navy", "bombing", "military", "defense", "weapons", "frontline", "casualties", "soldiers", "air defense", "shelling", "occupation", "hostilities"),
             "Science & discoveries": ("discovery", "breakthrough", "research", "scientist", "study", "nasa", "space mission", "astronomy", "telescope", "scientific"),
             "Mysteries & archaeology": ("archaeology", "archaeological", "ancient", "artifact", "mystery", "mysterious", "lost civilization", "shipwreck", "ruins", "excavation"),
         }
@@ -104,8 +107,13 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         publisher = clean_text(source.get("title", "")) if hasattr(source, "get") else ""
         if not publisher:
             publisher = domain or "Unknown publisher"
-        if summary.lower().startswith(title.lower()):
+        # Google News descriptions sometimes repeat the headline verbatim.
+        title_key = re.sub(r"\s+", " ", title).strip().casefold()
+        summary_key = re.sub(r"\s+", " ", summary).strip().casefold()
+        if summary_key == title_key:
             summary = ""
+        elif summary_key.startswith(title_key):
+            summary = summary[len(title):].lstrip(" -:|")
         if publisher and summary.lower().endswith(publisher.lower()):
             summary = summary[: -len(publisher)].strip()
         if summary.lower() == title.lower():
@@ -138,11 +146,14 @@ def main():
 
     seen = set()
     unique = []
+    topic_counts = {topic: 0 for topic in TOPICS}
+    # Keep the shortlist from being overwhelmed by one broad category.
     for story in sorted(all_stories, key=lambda item: item["published"], reverse=True):
         key = re.sub(r"[^a-z0-9]+", " ", story["title"].lower()).strip()
-        if key in seen:
+        if key in seen or topic_counts.get(story["topic"], 0) >= MAX_PER_TOPIC:
             continue
         seen.add(key)
+        topic_counts[story["topic"]] = topic_counts.get(story["topic"], 0) + 1
         unique.append(story)
 
     local_now = now.astimezone(KYIV)
