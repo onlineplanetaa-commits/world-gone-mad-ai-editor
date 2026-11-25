@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: world-gone-mad-ai-editor
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn web_app:app
+    healthCheckPath: /health
