@@ -75,7 +75,9 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         link = entry.get("link", "")
         summary = clean_text(entry.get("summary", ""))
         published = published_datetime(entry)
-        domain = get_domain(link)
+        source = entry.get("source", {})
+        source_url = source.get("href", "") if hasattr(source, "get") else ""
+        domain = get_domain(source_url or link)
         haystack = (title + " " + summary).lower()
 
         if not title or not link or not published or published < cutoff:
@@ -85,10 +87,29 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         if any(term in haystack for term in BLOCKED_TERMS):
             continue
 
-        source = entry.get("source", {})
+        # Require a meaningful title signal for the selected topic. This cuts
+        # unrelated stories returned by broad Google News OR queries.
+        title_lower = title.lower()
+        topic_signals = {
+            "UFOs & unexplained": ("ufo", "uap", "alien", "extraterrestrial", "unexplained aerial"),
+            "Strange events & creatures": ("creature", "monster", "beast", "cryptid", "mysterious", "strange", "unusual", "sighting"),
+            "Disasters & extreme events": ("earthquake", "volcano", "eruption", "flood", "hurricane", "tornado", "wildfire", "tsunami", "landslide", "disaster", "extreme weather"),
+            "Wars & global events": ("war", "conflict", "missile", "drone", "airstrike", "airspace", "attack", "invasion", "ceasefire", "troops", "army", "navy", "bombing", "military operation", "strike"),
+            "Science & discoveries": ("discovery", "breakthrough", "research", "scientist", "study", "nasa", "space mission", "astronomy", "telescope", "scientific"),
+            "Mysteries & archaeology": ("archaeology", "archaeological", "ancient", "artifact", "mystery", "mysterious", "lost civilization", "shipwreck", "ruins", "excavation"),
+        }
+        if not any(signal in title_lower for signal in topic_signals.get(topic, ())):
+            continue
+
         publisher = clean_text(source.get("title", "")) if hasattr(source, "get") else ""
         if not publisher:
             publisher = domain or "Unknown publisher"
+        if summary.lower().startswith(title.lower()):
+            summary = ""
+        if publisher and summary.lower().endswith(publisher.lower()):
+            summary = summary[: -len(publisher)].strip()
+        if summary.lower() == title.lower():
+            summary = ""
 
         stories.append({
             "topic": topic,
