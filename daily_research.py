@@ -68,18 +68,39 @@ def get_domain(url: str) -> str:
 
 
 def fetch_topic(topic: str, query: str, cutoff: datetime):
-    rss_url = (
-        "https://news.google.com/rss/search?q="
-        + quote_plus(query + " when:1d")
-        + "&hl=en&gl=US&ceid=US:en"
-    )
-    request = Request(
-        rss_url,
-        headers={"User-Agent": "WorldGoneMadResearch/1.0 (daily public RSS research)"},
-    )
-    with urlopen(request, timeout=20) as response:
-        payload = response.read(2_000_000)
-    feed = feedparser.parse(payload)
+    search_query = query + " when:1d"
+    feed = None
+    feed_provider = ""
+    feed_errors = []
+    rss_urls = [
+        ("Google News", "https://news.google.com/rss/search?q=" + quote_plus(search_query) + "&hl=en&gl=US&ceid=US:en"),
+        ("Bing News", "https://www.bing.com/news/search?q=" + quote_plus(search_query) + "&format=rss&setlang=en-us"),
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    for provider, rss_url in rss_urls:
+        for attempt in range(2 if provider == "Google News" else 1):
+            try:
+                request = Request(rss_url, headers=headers)
+                with urlopen(request, timeout=20) as response:
+                    payload = response.read(2_000_000)
+                candidate_feed = feedparser.parse(payload)
+                if candidate_feed.entries:
+                    feed = candidate_feed
+                    feed_provider = provider
+                    break
+                feed_errors.append(f"{provider}: empty feed")
+            except Exception as exc:
+                feed_errors.append(f"{provider}: {type(exc).__name__}: {exc}")
+            if provider == "Google News" and attempt == 0:
+                time.sleep(2)
+        if feed is not None:
+            break
+    if feed is None:
+        raise RuntimeError("; ".join(feed_errors) or "all RSS providers returned no entries")
     stories = []
 
     for entry in feed.entries:
@@ -142,6 +163,7 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
             "publisher": publisher,
             "domain": domain,
             "published": published,
+            "feed_provider": feed_provider,
         })
 
     return stories
@@ -492,7 +514,8 @@ def main():
             f"- **Publisher:** {story['publisher']} ({story['domain'] or 'domain unavailable'})",
             f"- **Research priority:** {story.get('priority_score', 2)}/10 — {', '.join(story.get('priority_reasons', ['recent candidate']))}",
             f"- **Original report:** {story['link']}",
-            f"- **Google link resolution:** {story.get('link_resolution', 'not attempted')}",
+            f"- **Feed provider:** {story.get('feed_provider', 'unknown')}",
+            f"- **Google link resolution:** {story.get('link_resolution', 'not needed')}",
             f"- **Article extraction:** {story.get('article', {}).get('status', 'not attempted')}",
             f"- **Resolved page:** {story.get('article', {}).get('resolved_url', 'not resolved')}",
             "",
