@@ -6,7 +6,10 @@ from __future__ import annotations
 import calendar
 from difflib import SequenceMatcher
 import html
+from html.parser import HTMLParser
+import ipaddress
 import re
+import socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
@@ -142,6 +145,90 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
     return stories
 
 
+class ArticleTextParser(HTMLParser):
+    """Small, dependency-free extractor for readable article paragraphs."""
+    SKIP_TAGS = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form"}
+    CONTENT_TAGS = {"article", "main"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.skip_depth = 0
+        self.content_depth = 0
+        self.paragraph_depth = 0
+        self.paragraphs = []
+        self.current = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP_TAGS:
+            self.skip_depth += 1
+            return
+        if self.skip_depth:
+            return
+        if tag in self.CONTENT_TAGS:
+            self.content_depth += 1
+        if tag == "p":
+            self.paragraph_depth += 1
+            self.current = []
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP_TAGS and self.skip_depth:
+            self.skip_depth -= 1
+            return
+        if self.skip_depth:
+            return
+        if tag == "p" and self.paragraph_depth:
+            value = clean_text(" ".join(self.current))
+            if len(value) >= 45:
+                self.paragraphs.append((self.content_depth > 0, value))
+            self.paragraph_depth -= 1
+            self.current = []
+        if tag in self.CONTENT_TAGS and self.content_depth:
+            self.content_depth -= 1
+
+    def handle_data(self, data):
+        if not self.skip_depth and self.paragraph_depth:
+            self.current.append(data)
+
+    def article_text(self):
+        preferred = [p for in_article, p in self.paragraphs if in_article]
+        chosen = preferred if preferred else [p for _, p in self.paragraphs]
+        return "\\n\\n".join(chosen)[:9000]
+
+
+def fetch_article_text(url):
+    """Fetch a public article page without bypassing paywalls or script barriers."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return {"status": "skipped: unsupported URL", "text": ""}
+        host = parsed.hostname.lower()
+        if host in ("localhost",) or host.endswith((".local", ".internal")):
+            return {"status": "skipped: non-public host", "text": ""}
+        try:
+            addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+            if not addresses or any(ipaddress.ip_address(item[4][0].split("%")[0]).is_private or ipaddress.ip_address(item[4][0].split("%")[0]).is_loopback or ipaddress.ip_address(item[4][0].split("%")[0]).is_link_local for item in addresses):
+                return {"status": "skipped: non-public address", "text": ""}
+        except Exception:
+            return {"status": "unavailable: host lookup failed", "text": ""}
+        request = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; WorldGoneMadResearch/1.0)", "Accept": "text/html"})
+        with urlopen(request, timeout=8) as response:
+            final_host = (urlparse(response.geturl()).hostname or "").lower()
+            if final_host != host:
+                return {"status": "unavailable: redirected to another host", "text": ""}
+            content_type = response.headers.get("Content-Type", "")
+            if "html" not in content_type.lower():
+                return {"status": "unavailable: not an HTML page", "text": ""}
+            payload = response.read(1_000_000)
+        parser = ArticleTextParser()
+        parser.feed(payload.decode("utf-8", errors="replace"))
+        text = parser.article_text()
+        if len(text) < 250:
+            return {"status": "limited: page blocked, scripted or no readable article text", "text": text}
+        return {"status": "extracted", "text": text}
+    except Exception as exc:
+        return {"status": f"unavailable: {type(exc).__name__}", "text": ""}
+
+
 def find_other_coverage(story):
     """Find additional publisher leads; syndication is not proof of independence."""
     query = '"' + story["title"][:180] + '" when:7d'
@@ -239,6 +326,10 @@ def main():
     # These are leads to inspect, not proof of independent corroboration.
     for story in unique[:MAX_STORIES]:
         story["coverage"] = find_other_coverage(story)
+        story["article"] = fetch_article_text(story["link"])
+        # Read at most one additional publisher page; the others remain leads.
+        for lead in story["coverage"][:1]:
+            lead["article"] = fetch_article_text(lead["link"])
         story["priority_score"], story["priority_reasons"] = score_research_priority(story)
 
     local_now = now.astimezone(KYIV)
@@ -270,12 +361,17 @@ def main():
             f"- **Publisher:** {story['publisher']} ({story['domain'] or 'domain unavailable'})",
             f"- **Research priority:** {story.get('priority_score', 2)}/10 — {', '.join(story.get('priority_reasons', ['recent candidate']))}",
             f"- **Original report:** {story['link']}",
+            f"- **Article extraction:** {story.get('article', {}).get('status', 'not attempted')}",
             "",
             story["summary"] or "_No summary supplied by the feed._",
             "",
+            "**Extracted original article text (for manual review):**",
+            "",
+            (story.get("article", {}).get("text", "")[:2200] or "_No readable article text extracted. Open the original page manually; paywalls and script-rendered pages are not bypassed._"),
+            "",
             f"**Other coverage leads ({len(story.get('coverage', []))}; check whether they are independent):**",
             *(
-                [f"- {item['publisher']} ({item['domain']}): [{item['title']}]({item['link']})" for item in story.get("coverage", [])]
+                [f"- {item['publisher']} ({item['domain']}): [{item['title']}]({item['link']}) — article: {item.get('article', {}).get('status', 'not fetched')}" for item in story.get("coverage", [])]
                 or ["- No additional publisher leads found by the title search."]
             ),
             "",
