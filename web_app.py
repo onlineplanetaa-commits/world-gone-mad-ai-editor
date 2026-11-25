@@ -117,9 +117,10 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <h3>{{research_title}}</h3>
 <p class="muted">These are search leads, not verified independent confirmation. Check whether each report has its own evidence and is not merely repeating the original story.</p>
 {% if research_results %}
+<p class="muted">Potentially distinct publishers found: {{research_publisher_count}}. This is a publisher count, not a reliability score.</p>
 {% for item in research_results %}
 <article class="story"><h3>{{loop.index}}. {{item.title}}</h3>
-<div class="meta">Publisher: {{item.source}} · {{item.published}}</div>
+<div class="meta">Publisher: {{item.source}} · {{item.published}}{% if item.publisher_domain %} · {{item.publisher_domain}}{% endif %}</div>
 {% if item.summary %}<p>{{item.summary|striptags|truncate(400)}}</p>{% endif %}
 {% if item.link %}<a class="button" href="{{item.link}}" target="_blank" rel="noopener noreferrer">Open coverage</a>{% endif %}
 </article>
@@ -148,7 +149,7 @@ def render_page(**kwargs):
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
         "stories": [], "filtered_count": 0, "draft": None, "error": None, "source_link": None,
-        "research_results": None, "research_title": "",
+        "research_results": None, "research_title": "", "research_publisher_count": 0,
         "checklist": None, "idea": "",
     }
     defaults.update(kwargs)
@@ -207,39 +208,55 @@ def research():
     original_link = request.form.get("link", "").strip()
     if not title:
         return render_page(error="No story title was supplied for the additional search.")
-    # Search the exact headline in Google News to locate other publishers.
-    query = '"' + title.replace('"', ' ') + '" -site:ua-stena.info'
-    url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en&gl=US&ceid=US:en"
+    # Run an exact-title search and a broader keyword search. Google News
+    # results are leads only; matching coverage is not proof of independence.
+    clean_title = title.replace('"', ' ')
+    words = [word for word in clean_title.split() if len(word) > 3]
+    broad_query = " ".join(words[:8]) if words else clean_title
+    queries = [
+        '"' + clean_title + '" -site:ua-stena.info',
+        broad_query + " -site:ua-stena.info",
+    ]
     try:
-        parsed = feedparser.parse(url)
         results = []
-        seen = set()
-        for entry in parsed.entries:
-            if not is_relevant_story(entry):
-                continue
-            publisher = entry.get("source", {}).get("title", "Publisher not identified").strip()
-            publisher_key = publisher.lower()
-            headline = entry.get("title", "").strip()
-            key = headline.lower()
-            if not headline or key in seen:
-                continue
-            # Do not count the original publisher or the original link as another source.
-            if original_source and publisher_key == original_source:
-                continue
-            if original_link and entry.get("link", "").split("?")[0] == original_link.split("?")[0]:
-                continue
-            seen.add(key)
-            results.append({
-                "title": headline,
-                "source": publisher,
-                "published": entry.get("published", "Date unavailable"),
-                "summary": entry.get("summary", ""),
-                "link": entry.get("link", ""),
-            })
+        seen_titles = set()
+        seen_publishers = set()
+        for query in queries:
+            url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en&gl=US&ceid=US:en"
+            parsed = feedparser.parse(url)
+            for entry in parsed.entries:
+                if not is_relevant_story(entry):
+                    continue
+                publisher = entry.get("source", {}).get("title", "Publisher not identified").strip()
+                publisher_key = publisher.lower()
+                headline = entry.get("title", "").strip()
+                key = headline.lower()
+                source_url = entry.get("source", {}).get("href", "") or entry.get("source", {}).get("url", "")
+                publisher_domain = urlparse(source_url).netloc.lower().removeprefix("www.")
+                # Do not count the original publisher or original link as another source.
+                if original_source and publisher_key == original_source:
+                    continue
+                if original_link and entry.get("link", "").split("?")[0] == original_link.split("?")[0]:
+                    continue
+                if not headline or key in seen_titles or publisher_key in seen_publishers:
+                    continue
+                seen_titles.add(key)
+                seen_publishers.add(publisher_key)
+                results.append({
+                    "title": headline,
+                    "source": publisher,
+                    "publisher_domain": publisher_domain,
+                    "published": entry.get("published", "Date unavailable"),
+                    "summary": entry.get("summary", ""),
+                    "link": entry.get("link", ""),
+                })
+                if len(results) >= 10:
+                    break
             if len(results) >= 10:
                 break
         return render_page(
             research_results=results,
+            research_publisher_count=len(seen_publishers),
             research_title=title,
             source_link=original_link,
         )
