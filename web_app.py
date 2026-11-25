@@ -435,6 +435,8 @@ def analyze_coverage():
             "research_publisher_count": len({x["publisher_domain"] or x["source"] for x in safe_records}),
             "research_date_count": len({x["published"][:10] for x in safe_records if x["published"]}),
             "source_link": source_link,
+            "extracted_original": original_text or None,
+            "extracted_results": safe_records,
         }
         if not api_key:
             return render_page(error="AI coverage analysis requires OPENAI_API_KEY in Render. Your coverage results are preserved below.", **page_state)
