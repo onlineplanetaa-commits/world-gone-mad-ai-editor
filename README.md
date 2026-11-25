@@ -55,3 +55,18 @@ For the Render version, add an environment variable named `OPENAI_API_KEY` in th
 ## Editorial rule
 
 Treat RSS results as story leads, not established facts. Open the original report, verify dates and claims, and seek independent confirmation before publishing. Clearly label uncertainty and never invent details.
+
+## Daily research shortlist
+
+GitHub Actions builds a shortlist automatically every day at 06:15 UTC (08:15 in Ukraine during winter time; 09:15 during summer time). It also runs when `daily_research.py` or its workflow changes, and can be started manually.
+
+To start it manually:
+
+1. Open the repository's **Actions** tab.
+2. Select **Daily research shortlist**.
+3. Choose **Run workflow**, then confirm.
+4. Open the `daily-shortlist/` folder on the `main` branch after the run finishes.
+
+Each run saves a dated Markdown file containing up to 15 candidate stories from the previous 24 hours. The workflow uses public Google News RSS feeds and does not need an OpenAI API key. It does not publish anything to Telegram. The shortlist is a research queue, not fact-checking; verify original reports and independent sources before using a story.
+
+If no workflow runs appear, check the repository's **Settings → Actions → General** and make sure Actions are enabled and allowed to run.
