@@ -44,6 +44,7 @@ BLOCKED_TERMS = (
     "full moon calendar", "moon phases", "forum to focus", "supports military families",
     "ufo spark", "ufo device", "ufo technology", "green path review",
     "stock", "shares", "ticker", "earnings", "investor",
+    "thanksgiving meals", "military friends foundation", "wedding photos",
 )
 
 
@@ -114,6 +115,9 @@ def fetch_topic(topic: str, query: str, cutoff: datetime):
         haystack = (title + " " + summary).lower()
 
         if not title or not link or not published or published < cutoff:
+            continue
+        # Google News occasionally indexes photo-gallery assets as if they were reports.
+        if "/tbc_blox_images/" in link.lower():
             continue
         if domain == "ua-stena.info" or domain.endswith(".ua-stena.info"):
             continue
