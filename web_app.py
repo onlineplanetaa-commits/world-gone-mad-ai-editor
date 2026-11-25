@@ -98,12 +98,13 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 {% for s in stories %}
 <article class="story"><h3>{{loop.index}}. {{s.title}}</h3>
 <p>{{s.summary|striptags|truncate(500)}}</p>
-<div class="meta">Published: {{s.published}} · Feed source: {{s.source}}</div>
+<div class="meta">Published: {{s.published}} · Feed source: {{s.source}}{% if s.publisher_domain %} · {{s.publisher_domain}}{% endif %}</div>
 {% if s.link %}<p><a class="button" href="{{s.link}}" target="_blank" rel="noopener noreferrer">Open original report</a></p>{% endif %}
 <div class="checks"><strong>Editorial checks</strong><p>☐ Confirm the original publication</p><p>☐ Check the event date and location</p><p>☐ Compare with another reliable source</p><p>☐ Separate confirmed facts from claims</p></div>
 <form method="post" action="/research">
 <input type="hidden" name="title" value="{{s.title}}">
 <input type="hidden" name="source" value="{{s.source}}">
+<input type="hidden" name="source_domain" value="{{s.publisher_domain}}">
 <input type="hidden" name="link" value="{{s.link}}">
 <button type="submit">Find other coverage</button>
 </form>
@@ -127,7 +128,7 @@ a{color:#ff777d}hr{border:0;border-top:1px solid #393b42;margin:24px 0}
 <h3>{{research_title}}</h3>
 <p class="muted">These are search leads, not verified independent confirmation. Check whether each report has its own evidence and is not merely repeating the original story.</p>
 {% if research_results %}
-<p class="muted">Potentially distinct publishers found: {{research_publisher_count}}. This is a publisher count, not a reliability score.</p>
+<div class="notice ok"><strong>Coverage scan</strong><p>{{research_publisher_count}} potentially distinct publishers returned matching coverage.</p><p>{{research_date_count}} different publication dates appear in these results.</p><p class="muted">This measures search coverage only. It does not establish that reports are independent, accurate or reliable.</p></div>
 {% for item in research_results %}
 <article class="story"><h3>{{loop.index}}. {{item.title}}</h3>
 <div class="meta">Publisher: {{item.source}} · {{item.published}}{% if item.publisher_domain %} · {{item.publisher_domain}}{% endif %}</div>
@@ -159,7 +160,7 @@ def render_page(**kwargs):
         "category": "UFOs & unexplained", "region": "Worldwide",
         "period": "Past 24 hours", "limit": 15, "searched": False,
         "stories": [], "filtered_count": 0, "draft": None, "error": None, "source_link": None,
-        "research_results": None, "research_title": "", "research_publisher_count": 0,
+        "research_results": None, "research_title": "", "research_publisher_count": 0, "research_date_count": 0,
         "checklist": None, "idea": "",
     }
     defaults.update(kwargs)
@@ -216,6 +217,7 @@ def research():
     title = request.form.get("title", "").strip()
     original_source = request.form.get("source", "").strip().lower()
     original_link = request.form.get("link", "").strip()
+    original_domain = request.form.get("source_domain", "").strip().lower().removeprefix("www.")
     if not title:
         return render_page(error="No story title was supplied for the additional search.")
     # Google News appends publisher names to many headlines ("Headline - Publisher").
@@ -248,8 +250,10 @@ def research():
                 key = headline.lower()
                 source_url = entry.get("source", {}).get("href", "") or entry.get("source", {}).get("url", "")
                 publisher_domain = urlparse(source_url).netloc.lower().removeprefix("www.")
-                # Do not count the original publisher or original link as another source.
+                # Exclude the original publisher by both display name and domain.
                 if original_source and publisher_key == original_source:
+                    continue
+                if original_domain and publisher_domain and (publisher_domain == original_domain or publisher_domain.endswith("." + original_domain)):
                     continue
                 if original_link and entry.get("link", "").split("?")[0] == original_link.split("?")[0]:
                     continue
@@ -272,6 +276,7 @@ def research():
         return render_page(
             research_results=results,
             research_publisher_count=len(seen_publishers),
+            research_date_count=len({item["published"] for item in results if item["published"] != "Date unavailable"}),
             research_title=title,
             source_link=original_link,
         )
