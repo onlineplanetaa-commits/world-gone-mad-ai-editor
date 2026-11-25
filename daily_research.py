@@ -23,6 +23,8 @@ import feedparser
 KYIV = ZoneInfo("Europe/Kyiv")
 OUTPUT_DIR = Path("daily-shortlist")
 MAX_STORIES = 15
+MAX_FULL_RESEARCH = 10
+MAX_CROSS_CHECKS = 8
 MAX_PER_TOPIC = 4
 WINDOW = timedelta(hours=24)
 
@@ -479,20 +481,24 @@ def main():
     # Search for other publisher coverage for each shortlisted candidate.
     # These are leads to inspect, not proof of independent corroboration.
     for index, story in enumerate(unique[:MAX_STORIES]):
-        story["coverage"] = find_other_coverage(story)
-        original_google_link = story["link"]
-        resolved_link, resolution_status = resolve_google_news_url(original_google_link)
-        story["google_link"] = original_google_link
-        story["link_resolution"] = resolution_status
-        story["link"] = resolved_link
-        story["article"] = fetch_article_text(resolved_link)
-        if index < 3 and story["coverage"]:
-            lead = story["coverage"][0]
-            lead_url, lead_resolution = resolve_google_news_url(lead["link"])
-            lead["link_resolution"] = lead_resolution
-            lead["link"] = lead_url
-            lead["article"] = fetch_article_text(lead_url) if lead_resolution == "resolved" else {"status": lead_resolution, "text": ""}
-            time.sleep(1)
+        story["coverage"] = find_other_coverage(story) if index < MAX_CROSS_CHECKS else []
+        if index < MAX_FULL_RESEARCH:
+            original_google_link = story["link"]
+            resolved_link, resolution_status = resolve_google_news_url(original_google_link)
+            story["google_link"] = original_google_link
+            story["link_resolution"] = resolution_status
+            story["link"] = resolved_link
+            story["article"] = fetch_article_text(resolved_link)
+            if index < 3 and story["coverage"]:
+                lead = story["coverage"][0]
+                lead_url, lead_resolution = resolve_google_news_url(lead["link"])
+                lead["link_resolution"] = lead_resolution
+                lead["link"] = lead_url
+                lead["article"] = fetch_article_text(lead_url) if lead_resolution == "resolved" else {"status": lead_resolution, "text": ""}
+                time.sleep(1)
+        else:
+            story["link_resolution"] = "not attempted: shortlist triage limit"
+            story["article"] = {"status": "not fetched: shortlist triage limit", "text": ""}
         story["priority_score"], story["priority_reasons"] = score_research_priority(story)
         time.sleep(1)
 
