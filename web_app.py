@@ -310,17 +310,25 @@ def analyze_coverage():
     summary = request.form.get("summary", "").strip()
     source_link = request.form.get("source_link", "").strip()
     api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        return render_page(error="AI coverage analysis requires OPENAI_API_KEY in Render. News search works without it.", source_link=source_link)
     try:
         records = json.loads(request.form.get("coverage_json", "[]"))
         if not isinstance(records, list) or not records:
             return render_page(error="No additional coverage records to compare.", source_link=source_link)
-        safe_records = [{"publisher": str(x.get("source", ""))[:120], "date": str(x.get("published", ""))[:80], "headline": str(x.get("title", ""))[:400], "summary": str(x.get("summary", ""))[:1800]} for x in records[:10] if isinstance(x, dict)]
+        safe_records = [{"source": str(x.get("publisher", x.get("source", "")))[:120], "published": str(x.get("date", x.get("published", "")))[:80], "title": str(x.get("headline", x.get("title", "")))[:400], "summary": str(x.get("summary", ""))[:1800], "link": str(x.get("link", ""))[:2000], "publisher_domain": str(x.get("publisher_domain", ""))[:200]} for x in records[:10] if isinstance(x, dict)]
+        page_state = {
+            "research_results": safe_records,
+            "research_title": title,
+            "original_summary": summary,
+            "research_publisher_count": len({x["publisher_domain"] or x["source"] for x in safe_records}),
+            "research_date_count": len({x["published"][:10] for x in safe_records if x["published"]}),
+            "source_link": source_link,
+        }
+        if not api_key:
+            return render_page(error="AI coverage analysis requires OPENAI_API_KEY in Render. Your coverage results are preserved below.", **page_state)
         from openai import OpenAI
         prompt = "Compare this original news report with the additional feed summaries. Identify repeated claims, differences, unknowns and checks needed. Do not invent facts. Do not treat repeated coverage as independent verification. Say when summaries are insufficient. Original headline: " + title + "\nOriginal summary: " + summary + "\nAdditional records: " + json.dumps(safe_records, ensure_ascii=False)
         response = OpenAI(api_key=api_key).responses.create(model="gpt-4.1-mini", input=prompt)
-        return render_page(analysis_report=response.output_text.strip(), source_link=source_link)
+        return render_page(analysis_report=response.output_text.strip(), **page_state)
     except Exception as exc:
         return render_page(error="Coverage analysis failed: " + str(exc), source_link=source_link), 500
 
